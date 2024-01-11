@@ -122,7 +122,7 @@ def main():
                         article.url,
                         article.title,
                         article.subtitle,
-                        ", ".join(article.authors),
+                        article.authors,
                         article.published,
                     )
                     for article in articles.values()
@@ -139,7 +139,6 @@ def main():
             for id in ids_of_articles_without_content:
                 article = articles[id]
                 try:
-                    # TODO: add a delay between requests
                     article.content_html = get_article_contents(
                         article.slug,
                         env["SUBSTACK_BASE_URL"],
