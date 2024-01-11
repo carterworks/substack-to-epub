@@ -5,6 +5,8 @@ import sqlite3
 from contextlib import closing
 from time import sleep
 from random import random
+from datetime import datetime
+import xml2epub
 
 
 class Article:
@@ -84,6 +86,30 @@ def get_article_contents(article_slug: str, base_url: str, sid_cookie: str) -> s
     return body_html
 
 
+def make_article_into_webpage(article: Article) -> str:
+    # published is something like "2024-01-08T11:00:19.386Z"
+    published = datetime.strptime(article.published, "%Y-%m-%dT%H:%M:%S.%fZ")
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{published.strftime("%Y-%m-%d")}: {article.title}</title>
+</head>
+<body>
+  <article>
+    <h1><a href="{article.url}">{article.title}</a></h1>
+    <h2>{article.subtitle}</h2>
+    <p>{article.authors} | {published.strftime("%Y-%m-%d")}</p>
+    <hr>
+    <div>{article.content_html}</div>
+  </article>
+</body>
+</html>
+"""
+
+
 def main():
     env = dotenv_values(".env")
     articles = get_article_urls(env["SUBSTACK_BASE_URL"], env["SUBSTACK_SID_COOKIE"])
@@ -154,17 +180,44 @@ def main():
                     sleep((random() + 0.5))
 
                 except Exception as e:
-                    print(
-                        f"Failed to get content for article {article.url}: {e}"
-                    )
+                    print(f"Failed to get content for article {article.url}: {e}")
             print(
                 f"Added the contents of {len(ids_of_articles_without_content)} articles to the database"
             )
-    # find all the images in each article
-    # download the image
-    # save the image to the database
-    # replace the image url in the article with the local url
-    # save the article to the database
+            first_article_date = c.execute(
+                "SELECT published FROM articles ORDER BY published ASC LIMIT 1"
+            ).fetchone()[0]
+            first_article_date = datetime.strptime(
+                first_article_date, "%Y-%m-%dT%H:%M:%S.%fZ"
+            ).strftime("%Y-%m-%d")
+            last_article_date = c.execute(
+                "SELECT published FROM articles ORDER BY published DESC LIMIT 1"
+            ).fetchone()[0]
+            last_article_date = datetime.strptime(
+                last_article_date, "%Y-%m-%dT%H:%M:%S.%fZ"
+            ).strftime("%Y-%m-%d")
+
+            newsletter_name = env["SUBSTACK_NEWSLETTER_NAME"]
+            book_title = f"{newsletter_name}: {first_article_date}–{last_article_date}"
+            book = xml2epub.Epub(
+                title=book_title,
+                creator=env["SUBSTACK_NEWSLETTER_AUTHOR"],
+                publisher=env["SUBSTACK_BASE_URL"],
+            )
+            for res in c.execute(
+                "SELECT id, slug, url, title, subtitle, authors, published, content_html FROM articles WHERE content_html IS NOT NULL ORDER BY published ASC"
+            ):
+                article = Article(*res)
+                webpage = make_article_into_webpage(article)
+                chapter = xml2epub.create_chapter_from_string(
+                    html_string=webpage, title=article.title, url=article.url
+                )
+                book.add_chapter(chapter)
+                print(f"Added article \"f{article.published}: {article.title}\" to ebook")
+            book.create_epub("./", book_title)
+            print(f"Created ebook './{book_title}.epub'")
+
+            
 
 
 if __name__ == "__main__":
